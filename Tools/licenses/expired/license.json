@@ -1,0 +1,9 @@
+{
+  "licenseId": "POC-EXPIRED",
+  "projectId": "demo-project",
+  "issuedAt": "2026-01-01T00:00:00Z",
+  "subscriptionValidUntil": "2026-01-15T23:59:59Z",
+  "offlineGraceUntil": "2026-01-20T23:59:59Z",
+  "lastValidation": "2026-01-01T00:00:00Z",
+  "signature": "zq/z/EQluepIY77HBZSKfrRMojy5xS79/pIW/9S66OEnnX02XuXuTur6SDO1Z3+/FDnk+DnabpPPMsInCwIiDA=="
+}

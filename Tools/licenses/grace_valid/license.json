@@ -1,0 +1,9 @@
+{
+  "licenseId": "POC-GRACE-VALID",
+  "projectId": "demo-project",
+  "issuedAt": "2026-08-21T00:00:00Z",
+  "subscriptionValidUntil": "2026-12-31T23:59:59Z",
+  "offlineGraceUntil": "2026-09-05T23:59:59Z",
+  "lastValidation": "2026-08-21T00:00:00Z",
+  "signature": "SgNk+658GVE8jWC8TxEAI9PRIDjmyiSEAXHhi1PVCe+iVIN6j7apSgd5QetCm0MyhfbLAYoSlUR9uBIdHEfCAA=="
+}

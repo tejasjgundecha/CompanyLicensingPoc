@@ -1,0 +1,9 @@
+{
+  "licenseId": "POC-001",
+  "projectId": "demo-project",
+  "issuedAt": "2026-08-21T00:00:00Z",
+  "subscriptionValidUntil": "2026-09-30T23:59:59Z",
+  "offlineGraceUntil": "2026-09-05T23:59:59Z",
+  "lastValidation": "",
+  "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+}

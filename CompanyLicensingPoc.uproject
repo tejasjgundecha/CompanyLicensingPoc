@@ -1,0 +1,19 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "",
+	"Category": "POC",
+	"Description": "Embedded license-check proof of concept. Licensing logic compiles into the packaged application.",
+	"Modules": [
+		{
+			"Name": "CompanyLicensingPoc",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "CompanyLicensing",
+			"Enabled": true
+		}
+	]
+}
