@@ -24,6 +24,7 @@ CANONICAL_FIELDS = (
     "subscriptionValidUntil",
     "offlineGraceUntil",
     "lastValidation",
+    "machineFingerprint",
 )
 
 
@@ -71,6 +72,7 @@ def main() -> int:
     parser.add_argument("--subscription-valid-until", required=True)
     parser.add_argument("--offline-grace-until", required=True)
     parser.add_argument("--last-validation", default="")
+    parser.add_argument("--machine-fingerprint", default="", help="64-char hex SHA-256 machine fingerprint (from collect_fingerprint.py)")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -81,6 +83,7 @@ def main() -> int:
         "subscriptionValidUntil": args.subscription_valid_until,
         "offlineGraceUntil": args.offline_grace_until,
         "lastValidation": args.last_validation,
+        "machineFingerprint": args.machine_fingerprint,
     }
     signature = sign(canonical_payload(data), args.private_key)
     data["signature"] = base64.b64encode(signature).decode("ascii")

@@ -1,5 +1,6 @@
 #include "LicenseManager.h"
 #include "LicenseValidator.h"
+#include "ClockGuard.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/CommandLine.h"
@@ -71,7 +72,21 @@ void FLicenseManager::InitializeAndEnforce()
 	}
 
 	Payload = Loaded;
-	State = FLicenseValidator::Validate(Payload, GetClockNowUtc());
+	const FDateTime NowUtc = GetClockNowUtc();
+
+	// Clock rollback check (Windows Shipping builds only — non-Shipping supports fake clocks)
+#if PLATFORM_WINDOWS && UE_BUILD_SHIPPING
+	if (FClockGuard::DetectRollback(NowUtc))
+	{
+		State = ELicenseState::ClockRollback;
+		UE_LOG(LogCompanyLicensing, Error, TEXT("License state=%s — system clock rollback detected"),
+			LicenseStateToString(State));
+		FailAndExit(State);
+		return;
+	}
+#endif
+
+	State = FLicenseValidator::Validate(Payload, NowUtc);
 	UE_LOG(LogCompanyLicensing, Log, TEXT("License state=%s file=%s licenseId=%s"),
 		LicenseStateToString(State),
 		*LicenseFilePath,
@@ -80,7 +95,13 @@ void FLicenseManager::InitializeAndEnforce()
 	if (!LicenseStateAllowsRun(State))
 	{
 		FailAndExit(State);
+		return;
 	}
+
+	// Record timestamp after successful validation (Windows only)
+#if PLATFORM_WINDOWS
+	FClockGuard::RecordTimestamp(NowUtc);
+#endif
 }
 
 bool FLicenseManager::TryLoadLicenseFile(FLicensePayload& OutPayload, FString& OutPath) const
@@ -130,6 +151,7 @@ bool FLicenseManager::ParseLicenseJson(const FString& JsonText, FLicensePayload&
 	Root->TryGetStringField(TEXT("subscriptionValidUntil"), OutPayload.SubscriptionValidUntil);
 	Root->TryGetStringField(TEXT("offlineGraceUntil"), OutPayload.OfflineGraceUntil);
 	Root->TryGetStringField(TEXT("lastValidation"), OutPayload.LastValidation);
+	Root->TryGetStringField(TEXT("machineFingerprint"), OutPayload.MachineFingerprint);
 	Root->TryGetStringField(TEXT("signature"), OutPayload.SignatureBase64);
 	return true;
 }

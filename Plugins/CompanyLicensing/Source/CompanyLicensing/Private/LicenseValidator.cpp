@@ -1,5 +1,6 @@
 #include "LicenseValidator.h"
 #include "SignatureVerifier.h"
+#include "MachineFingerprint.h"
 #include "Misc/Base64.h"
 
 namespace
@@ -41,6 +42,18 @@ ELicenseState FLicenseValidator::Validate(const FLicensePayload& Payload, const 
 	{
 		return ELicenseState::LicenseInvalid;
 	}
+
+	// Machine fingerprint check (Windows only, skipped if license has no fingerprint)
+#if PLATFORM_WINDOWS
+	if (!Payload.MachineFingerprint.IsEmpty())
+	{
+		FString CurrentFingerprint = FMachineFingerprint::ComputeFingerprint();
+		if (CurrentFingerprint != Payload.MachineFingerprint)
+		{
+			return ELicenseState::MachineMismatch;
+		}
+	}
+#endif
 
 	FDateTime SubscriptionEnd;
 	FDateTime GraceEnd;

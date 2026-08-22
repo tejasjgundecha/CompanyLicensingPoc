@@ -15,10 +15,12 @@ Unreal Application (packaged EXE)
 ├── Unreal Engine
 ├── CompanyLicensingPoc (game module: HUD text only)
 └── CompanyLicensing (plugin, compiled in)
-      ├── LicenseManager      startup load + enforce
-      ├── LicenseValidator    state machine
-      ├── SignatureVerifier   Ed25519 via OpenSSL
-      └── LicenseState        enum, not booleans
+      ├── LicenseManager        startup load + enforce
+      ├── LicenseValidator      state machine
+      ├── SignatureVerifier     Ed25519 via OpenSSL
+      ├── MachineFingerprint   SHA-256 hardware binding (Windows)
+      ├── ClockGuard           clock rollback detection (Windows)
+      └── LicenseState         enum, not booleans
 ```
 
 | Path | Role |
@@ -27,6 +29,7 @@ Unreal Application (packaged EXE)
 | `Source/CompanyLicensingPoc/` | Tiny blank C++ game |
 | `Tools/` | Keygen + license signing (OpenSSL). **Not shipped inside the game.** |
 | `Tools/keys/poc_ed25519_private.pem` | Test **private** key. Never copied into the EXE. |
+| `Tools/collect_fingerprint.py` | Collects machine fingerprint on target Windows machine |
 | `Plugins/.../Private/LicensePublicKey.h` | Test **public** key compiled into the plugin |
 
 ## Validation sequence
@@ -35,12 +38,14 @@ On packaged-game startup:
 
 1. Plugin `StartupModule` runs (`LoadingPhase: PostConfigInit`).
 2. Load `license.json` from the executable directory (also checks the project dir for editor convenience).
-3. Rebuild a **canonical payload** (not the raw JSON) and verify the Ed25519 signature with the **embedded public key**.
-4. Check `projectId == demo-project`.
-5. Check `subscriptionValidUntil` against current UTC time.
-6. Check `offlineGraceUntil` against current UTC time.
-7. Valid → continue; HUD shows `License Valid - Application Running`.
-8. Invalid → modal `License validation failed.` (or grace-expired wording) and `RequestExitWithStatus`.
+3. **(Shipping only)** Check for **clock rollback** — compare current UTC against a persisted registry timestamp and `GetTickCount64` boot-time estimate. Fail if rollback > 5 minutes.
+4. Rebuild a **canonical payload** (not the raw JSON) and verify the Ed25519 signature with the **embedded public key**.
+5. Check `projectId == demo-project`.
+6. **(Windows only)** If `machineFingerprint` is non-empty, compute the current machine's SHA-256 fingerprint and compare. Fail if mismatch.
+7. Check `subscriptionValidUntil` against current UTC time.
+8. Check `offlineGraceUntil` against current UTC time.
+9. Valid → record timestamp in registry; HUD shows `License Valid - Application Running`.
+10. Invalid → modal error message and `RequestExitWithStatus`.
 
 The JSON `signature` field is **not** part of the signed data. Changing any signed field without re-signing yields `LICENSE_TAMPERED`.
 
@@ -55,6 +60,7 @@ issuedAt=...
 subscriptionValidUntil=...
 offlineGraceUntil=...
 lastValidation=...
+machineFingerprint=...
 ```
 
 ### License states
@@ -68,10 +74,14 @@ lastValidation=...
 | `LICENSE_INVALID` | No | Bad Base64, bad dates, or wrong `projectId` |
 | `LICENSE_EXPIRED` | No | `subscriptionValidUntil` in the past |
 | `OFFLINE_GRACE_EXPIRED` | No | Subscription still valid but grace window ended |
+| `LICENSE_MACHINE_MISMATCH` | No | Machine fingerprint does not match the signed value |
+| `LICENSE_CLOCK_ROLLBACK` | No | System clock rolled back (Shipping only) |
 
 User-facing text:
 
 - `OFFLINE_GRACE_EXPIRED` → `License validation period has expired.`
+- `LICENSE_MACHINE_MISMATCH` → `This license is not authorized for this machine.`
+- `LICENSE_CLOCK_ROLLBACK` → `System clock tampering detected.`
 - Every other failure → `License validation failed.`
 
 ## Cryptography

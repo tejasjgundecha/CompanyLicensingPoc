@@ -10,6 +10,7 @@ struct FLicensePayload
 	FString SubscriptionValidUntil;
 	FString OfflineGraceUntil;
 	FString LastValidation;
+	FString MachineFingerprint;
 	FString SignatureBase64;
 
 	bool bLoadedFromDisk = false;
@@ -27,12 +28,13 @@ namespace CompanyLicensing
 	inline FString BuildCanonicalPayload(const FLicensePayload& Payload)
 	{
 		return FString::Printf(
-			TEXT("licenseId=%s\nprojectId=%s\nissuedAt=%s\nsubscriptionValidUntil=%s\nofflineGraceUntil=%s\nlastValidation=%s\n"),
+			TEXT("licenseId=%s\nprojectId=%s\nissuedAt=%s\nsubscriptionValidUntil=%s\nofflineGraceUntil=%s\nlastValidation=%s\nmachineFingerprint=%s\n"),
 			*Payload.LicenseId,
 			*Payload.ProjectId,
 			*Payload.IssuedAt,
 			*Payload.SubscriptionValidUntil,
 			*Payload.OfflineGraceUntil,
-			*Payload.LastValidation);
+			*Payload.LastValidation,
+			*Payload.MachineFingerprint);
 	}
 }

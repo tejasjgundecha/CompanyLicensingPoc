@@ -30,6 +30,7 @@ def main() -> int:
         subscription_valid_until="2026-09-30T23:59:59Z",
         offline_grace_until="2026-09-05T23:59:59Z",
         last_validation="",
+        machine_fingerprint="",
         output=str(OUT / "valid" / "license.json"),
     )
 
@@ -39,6 +40,7 @@ def main() -> int:
         subscription_valid_until="2026-01-15T23:59:59Z",
         offline_grace_until="2026-01-20T23:59:59Z",
         last_validation="2026-01-01T00:00:00Z",
+        machine_fingerprint="",
         output=str(OUT / "expired" / "license.json"),
     )
 
@@ -48,6 +50,7 @@ def main() -> int:
         subscription_valid_until="2026-12-31T23:59:59Z",
         offline_grace_until="2026-09-05T23:59:59Z",
         last_validation="2026-08-21T00:00:00Z",
+        machine_fingerprint="",
         output=str(OUT / "grace_valid" / "license.json"),
     )
 
@@ -57,7 +60,18 @@ def main() -> int:
         subscription_valid_until="2026-12-31T23:59:59Z",
         offline_grace_until="2026-08-01T23:59:59Z",
         last_validation="2026-07-01T00:00:00Z",
+        machine_fingerprint="",
         output=str(OUT / "grace_expired" / "license.json"),
+    )
+
+    generate(
+        license_id="POC-MACHINE-BOUND",
+        issued_at="2026-08-21T00:00:00Z",
+        subscription_valid_until="2026-09-30T23:59:59Z",
+        offline_grace_until="2026-09-05T23:59:59Z",
+        last_validation="",
+        machine_fingerprint="a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+        output=str(OUT / "machine_bound" / "license.json"),
     )
 
     valid_data = json.loads(valid.read_text(encoding="utf-8"))

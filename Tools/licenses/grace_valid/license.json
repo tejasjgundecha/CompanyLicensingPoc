@@ -5,5 +5,6 @@
   "subscriptionValidUntil": "2026-12-31T23:59:59Z",
   "offlineGraceUntil": "2026-09-05T23:59:59Z",
   "lastValidation": "2026-08-21T00:00:00Z",
-  "signature": "SgNk+658GVE8jWC8TxEAI9PRIDjmyiSEAXHhi1PVCe+iVIN6j7apSgd5QetCm0MyhfbLAYoSlUR9uBIdHEfCAA=="
+  "machineFingerprint": "",
+  "signature": "yCSMbPZCtqTC5vIvXH7zLs+NWaFoTAuz0RX/6m1Ozv9gE6kpk60ia1WelMEIAFExq/lKkgtwPep18euz6hU+Dg=="
 }

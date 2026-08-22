@@ -26,6 +26,7 @@ CANONICAL_FIELDS = (
     "subscriptionValidUntil",
     "offlineGraceUntil",
     "lastValidation",
+    "machineFingerprint",
 )
 
 
@@ -37,6 +38,8 @@ class LicenseState(Enum):
     LICENSE_INVALID = "LICENSE_INVALID"
     OFFLINE_GRACE_VALID = "OFFLINE_GRACE_VALID"
     OFFLINE_GRACE_EXPIRED = "OFFLINE_GRACE_EXPIRED"
+    LICENSE_MACHINE_MISMATCH = "LICENSE_MACHINE_MISMATCH"
+    LICENSE_CLOCK_ROLLBACK = "LICENSE_CLOCK_ROLLBACK"
 
 
 def canonical_payload(data: dict) -> bytes:
@@ -90,7 +93,7 @@ def verify_signature(payload: bytes, signature: bytes, public_pem: Path) -> bool
         sig_path.unlink(missing_ok=True)
 
 
-def validate(path: Path | None, now: datetime, public_pem: Path) -> LicenseState:
+def validate(path: Path | None, now: datetime, public_pem: Path, machine_fingerprint: str | None = None) -> LicenseState:
     if path is None or not path.exists():
         return LicenseState.LICENSE_MISSING
 
@@ -105,6 +108,11 @@ def validate(path: Path | None, now: datetime, public_pem: Path) -> LicenseState
 
     if data.get("projectId") != EXPECTED_PROJECT_ID:
         return LicenseState.LICENSE_INVALID
+
+    lic_fingerprint = data.get("machineFingerprint", "")
+    if machine_fingerprint is not None and lic_fingerprint:
+        if machine_fingerprint != lic_fingerprint:
+            return LicenseState.LICENSE_MACHINE_MISMATCH
 
     subscription_end = parse_iso(data.get("subscriptionValidUntil", ""))
     grace_end = parse_iso(data.get("offlineGraceUntil", ""))
@@ -135,6 +143,7 @@ def main() -> int:
     parser.add_argument("--license", type=Path)
     parser.add_argument("--public-key", type=Path, default=DEFAULT_PUBLIC)
     parser.add_argument("--now", default=None, help="ISO-8601 UTC override, e.g. 2026-09-10T00:00:00Z")
+    parser.add_argument("--machine-fingerprint", default=None, help="Expected machine fingerprint for validation")
     args = parser.parse_args()
 
     if args.now:
@@ -144,7 +153,7 @@ def main() -> int:
     else:
         now = datetime.now(timezone.utc)
 
-    state = validate(args.license, now, args.public_key)
+    state = validate(args.license, now, args.public_key, args.machine_fingerprint)
     allows = state in (LicenseState.LICENSE_VALID, LicenseState.OFFLINE_GRACE_VALID)
     print(f"state={state.value}")
     print(f"allowsRun={str(allows).lower()}")

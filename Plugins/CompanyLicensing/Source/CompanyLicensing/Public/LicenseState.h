@@ -10,7 +10,9 @@ enum class ELicenseState : uint8
 	LicenseTampered,
 	LicenseInvalid,
 	OfflineGraceValid,
-	OfflineGraceExpired
+	OfflineGraceExpired,
+	MachineMismatch,
+	ClockRollback
 };
 
 inline const TCHAR* LicenseStateToString(ELicenseState State)
@@ -24,6 +26,8 @@ inline const TCHAR* LicenseStateToString(ELicenseState State)
 	case ELicenseState::LicenseInvalid: return TEXT("LICENSE_INVALID");
 	case ELicenseState::OfflineGraceValid: return TEXT("OFFLINE_GRACE_VALID");
 	case ELicenseState::OfflineGraceExpired: return TEXT("OFFLINE_GRACE_EXPIRED");
+	case ELicenseState::MachineMismatch: return TEXT("LICENSE_MACHINE_MISMATCH");
+	case ELicenseState::ClockRollback: return TEXT("LICENSE_CLOCK_ROLLBACK");
 	default: return TEXT("LICENSE_INVALID");
 	}
 }
@@ -38,6 +42,14 @@ inline FText LicenseStateUserMessage(ELicenseState State)
 	if (State == ELicenseState::OfflineGraceExpired)
 	{
 		return NSLOCTEXT("CompanyLicensing", "GraceExpired", "License validation period has expired.");
+	}
+	if (State == ELicenseState::MachineMismatch)
+	{
+		return NSLOCTEXT("CompanyLicensing", "MachineMismatch", "This license is not authorized for this machine.");
+	}
+	if (State == ELicenseState::ClockRollback)
+	{
+		return NSLOCTEXT("CompanyLicensing", "ClockRollback", "System clock tampering detected.");
 	}
 	return NSLOCTEXT("CompanyLicensing", "ValidationFailed", "License validation failed.");
 }
