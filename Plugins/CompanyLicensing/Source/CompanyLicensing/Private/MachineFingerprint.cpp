@@ -3,15 +3,11 @@
 DEFINE_LOG_CATEGORY_STATIC(LogMachineFingerprint, Log, All);
 
 #if PLATFORM_WINDOWS
-#pragma push_macro("UI")
-#undef UI
+#define OPENSSL_NO_UI_CONSOLE
+#define OPENSSL_NO_UI
 #endif
 
 #include <openssl/evp.h>
-
-#if PLATFORM_WINDOWS
-#pragma pop_macro("UI")
-#endif
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"

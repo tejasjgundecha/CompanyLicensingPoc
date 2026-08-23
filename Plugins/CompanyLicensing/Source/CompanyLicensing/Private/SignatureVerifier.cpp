@@ -2,16 +2,13 @@
 #include "LicensePublicKey.h"
 
 #if PLATFORM_WINDOWS
-// Windows.h defines UI which collides with OpenSSL.
-#pragma push_macro("UI")
-#undef UI
+// Prevent OpenSSL ossl_typ.h from defining 'typedef struct ui_st UI'
+// which collides with Unreal Engine's UI namespace.
+#define OPENSSL_NO_UI_CONSOLE
+#define OPENSSL_NO_UI
 #endif
 
 #include <openssl/evp.h>
-
-#if PLATFORM_WINDOWS
-#pragma pop_macro("UI")
-#endif
 
 bool FSignatureVerifier::VerifyEd25519(const TArray<uint8>& CanonicalUtf8, const TArray<uint8>& Signature)
 {
