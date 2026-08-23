@@ -3,11 +3,6 @@
 DEFINE_LOG_CATEGORY_STATIC(LogMachineFingerprint, Log, All);
 
 #if PLATFORM_WINDOWS
-#include "Windows/AllowWindowsPlatformTypes.h"
-#include <windows.h>
-#include <winreg.h>
-#include "Windows/HideWindowsPlatformTypes.h"
-
 #pragma push_macro("UI")
 #undef UI
 #endif
@@ -16,6 +11,13 @@ DEFINE_LOG_CATEGORY_STATIC(LogMachineFingerprint, Log, All);
 
 #if PLATFORM_WINDOWS
 #pragma pop_macro("UI")
+#endif
+
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include <windows.h>
+#include <winreg.h>
+#include "Windows/HideWindowsPlatformTypes.h"
 
 namespace
 {
