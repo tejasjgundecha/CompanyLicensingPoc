@@ -12,10 +12,25 @@
 #include "Serialization/JsonSerializer.h"
 #include "Dom/JsonObject.h"
 
+#if PLATFORM_WINDOWS
+#include "Windows/WindowsHWrapper.h"
+#endif
+
 DEFINE_LOG_CATEGORY_STATIC(LogCompanyLicensing, Log, All);
 
 namespace
 {
+	void ShowNativeDialog(const FText& Message, bool bIsSuccess)
+	{
+#if PLATFORM_WINDOWS
+		const TCHAR* Title = bIsSuccess ? TEXT("Company Licensing") : TEXT("License Error");
+		const UINT Flags = (bIsSuccess ? MB_ICONINFORMATION : MB_ICONERROR) | MB_OK | MB_TOPMOST | MB_SETFOREGROUND;
+		::MessageBoxW(NULL, *Message.ToString(), Title, Flags);
+#else
+		FMessageDialog::Open(EAppMsgType::Ok, Message);
+#endif
+	}
+
 	void DebugLogToFile(const FString& Message)
 	{
 		static FString DebugLogPath;
@@ -166,6 +181,9 @@ bool FLicenseManager::TryLoadLicenseFile(FLicensePayload& OutPayload, FString& O
 
 	const FString ExeDir = FPaths::GetPath(FPlatformProcess::ExecutablePath());
 	Candidates.Add(FPaths::Combine(ExeDir, TEXT("license.json")));
+	Candidates.Add(FPaths::Combine(ExeDir, TEXT("../../license.json")));
+	Candidates.Add(FPaths::Combine(ExeDir, TEXT("../../../license.json")));
+	Candidates.Add(FPaths::Combine(FPaths::RootDir(), TEXT("license.json")));
 	Candidates.Add(FPaths::Combine(FPaths::LaunchDir(), TEXT("license.json")));
 	Candidates.Add(FPaths::Combine(FPaths::ProjectDir(), TEXT("license.json")));
 	Candidates.Add(FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/licenses/valid/license.json")));
@@ -229,7 +247,7 @@ void FLicenseManager::ShowSuccessDialog(ELicenseState SuccessState) const
 {
 	const FText Message = LicenseStateUserMessage(SuccessState, Payload);
 	UE_LOG(LogCompanyLicensing, Log, TEXT("License Valid Dialog: %s"), *Message.ToString());
-	FMessageDialog::Open(EAppMsgType::Ok, Message);
+	ShowNativeDialog(Message, true);
 }
 
 void FLicenseManager::FailAndExit(ELicenseState FailedState) const
@@ -237,7 +255,7 @@ void FLicenseManager::FailAndExit(ELicenseState FailedState) const
 	const FText Message = LicenseStateUserMessage(FailedState, Payload);
 	UE_LOG(LogCompanyLicensing, Error, TEXT("%s (%s)"), *Message.ToString(), LicenseStateToString(FailedState));
 
-	FMessageDialog::Open(EAppMsgType::Ok, Message);
+	ShowNativeDialog(Message, false);
 
 #if WITH_EDITOR
 	if (GIsEditor)
