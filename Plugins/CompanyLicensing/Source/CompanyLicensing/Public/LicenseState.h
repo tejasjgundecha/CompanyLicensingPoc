@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "LicenseTypes.h"
 
 enum class ELicenseState : uint8
 {
@@ -37,19 +38,77 @@ inline bool LicenseStateAllowsRun(ELicenseState State)
 	return State == ELicenseState::LicenseValid || State == ELicenseState::OfflineGraceValid;
 }
 
-inline FText LicenseStateUserMessage(ELicenseState State)
+inline FText LicenseStateUserMessage(ELicenseState State, const FLicensePayload& Payload = FLicensePayload())
 {
-	if (State == ELicenseState::OfflineGraceExpired)
+	switch (State)
 	{
-		return NSLOCTEXT("CompanyLicensing", "GraceExpired", "License validation period has expired.");
-	}
-	if (State == ELicenseState::MachineMismatch)
+	case ELicenseState::LicenseValid:
 	{
-		return NSLOCTEXT("CompanyLicensing", "MachineMismatch", "This license is not authorized for this machine.");
+		if (!Payload.LicenseId.IsEmpty())
+		{
+			return FText::Format(
+				NSLOCTEXT("CompanyLicensing", "LicenseValidDetails", "License validated successfully.\n\nLicense ID: {0}\nSubscription Valid Until: {1}"),
+				FText::FromString(Payload.LicenseId),
+				FText::FromString(Payload.SubscriptionValidUntil)
+			);
+		}
+		return NSLOCTEXT("CompanyLicensing", "LicenseValid", "License validated successfully.");
 	}
-	if (State == ELicenseState::ClockRollback)
+	case ELicenseState::OfflineGraceValid:
 	{
-		return NSLOCTEXT("CompanyLicensing", "ClockRollback", "System clock tampering detected.");
+		if (!Payload.LicenseId.IsEmpty())
+		{
+			return FText::Format(
+				NSLOCTEXT("CompanyLicensing", "OfflineGraceValidDetails", "Running in offline grace mode.\n\nLicense ID: {0}\nOffline Grace Until: {1}\nSubscription Valid Until: {2}"),
+				FText::FromString(Payload.LicenseId),
+				FText::FromString(Payload.OfflineGraceUntil),
+				FText::FromString(Payload.SubscriptionValidUntil)
+			);
+		}
+		return NSLOCTEXT("CompanyLicensing", "OfflineGraceValid", "Running in offline grace mode.");
 	}
-	return NSLOCTEXT("CompanyLicensing", "ValidationFailed", "License validation failed.");
+	case ELicenseState::LicenseExpired:
+	{
+		if (!Payload.SubscriptionValidUntil.IsEmpty())
+		{
+			return FText::Format(
+				NSLOCTEXT("CompanyLicensing", "LicenseExpiredDetails", "Your subscription license has expired.\n\nExpired on: {0}\nPlease renew your license to continue using the application."),
+				FText::FromString(Payload.SubscriptionValidUntil)
+			);
+		}
+		return NSLOCTEXT("CompanyLicensing", "LicenseExpired", "Your subscription license has expired.\n\nPlease renew your license to continue using the application.");
+	}
+	case ELicenseState::OfflineGraceExpired:
+	{
+		if (!Payload.OfflineGraceUntil.IsEmpty())
+		{
+			return FText::Format(
+				NSLOCTEXT("CompanyLicensing", "GraceExpiredDetails", "Your offline grace period has expired.\n\nGrace period ended on: {0}\nPlease connect or update your license to continue."),
+				FText::FromString(Payload.OfflineGraceUntil)
+			);
+		}
+		return NSLOCTEXT("CompanyLicensing", "GraceExpired", "Your offline grace period has expired.\n\nPlease connect or update your license to continue.");
+	}
+	case ELicenseState::MachineMismatch:
+	{
+		return NSLOCTEXT("CompanyLicensing", "MachineMismatch", "This license is not authorized for this computer.\n\nPlease contact support to obtain an authorized license.");
+	}
+	case ELicenseState::LicenseMissing:
+	{
+		return NSLOCTEXT("CompanyLicensing", "LicenseMissing", "No license found for this application.\n\nPlease install a valid license to continue.");
+	}
+	case ELicenseState::ClockRollback:
+	{
+		return NSLOCTEXT("CompanyLicensing", "ClockRollback", "System clock rollback detected.\n\nPlease ensure your system date and time are set correctly.");
+	}
+	case ELicenseState::LicenseTampered:
+	{
+		return NSLOCTEXT("CompanyLicensing", "LicenseTampered", "License verification failed.\n\nThe license data appears to be modified or corrupted. Please reinstall an original valid license.");
+	}
+	case ELicenseState::LicenseInvalid:
+	default:
+	{
+		return NSLOCTEXT("CompanyLicensing", "LicenseInvalid", "The provided license is invalid for this application.\n\nPlease contact support to obtain a valid license.");
+	}
+	}
 }

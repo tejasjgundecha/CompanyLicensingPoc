@@ -156,6 +156,8 @@ void FLicenseManager::InitializeAndEnforce()
 
 	UE_LOG(LogCompanyLicensing, Warning, TEXT("========== License Manager Initialization Successful =========="));
 	DebugLogToFile(TEXT("========== License Manager Initialization Successful =========="));
+
+	ShowSuccessDialog(State);
 }
 
 bool FLicenseManager::TryLoadLicenseFile(FLicensePayload& OutPayload, FString& OutPath) const
@@ -223,10 +225,19 @@ bool FLicenseManager::ParseLicenseJson(const FString& JsonText, FLicensePayload&
 	return true;
 }
 
+void FLicenseManager::ShowSuccessDialog(ELicenseState SuccessState) const
+{
+	const FText Message = LicenseStateUserMessage(SuccessState, Payload);
+	UE_LOG(LogCompanyLicensing, Log, TEXT("License Valid Dialog: %s"), *Message.ToString());
+	FMessageDialog::Open(EAppMsgType::Ok, Message);
+}
+
 void FLicenseManager::FailAndExit(ELicenseState FailedState) const
 {
-	const FText Message = LicenseStateUserMessage(FailedState);
+	const FText Message = LicenseStateUserMessage(FailedState, Payload);
 	UE_LOG(LogCompanyLicensing, Error, TEXT("%s (%s)"), *Message.ToString(), LicenseStateToString(FailedState));
+
+	FMessageDialog::Open(EAppMsgType::Ok, Message);
 
 #if WITH_EDITOR
 	if (GIsEditor)
@@ -235,8 +246,6 @@ void FLicenseManager::FailAndExit(ELicenseState FailedState) const
 		return;
 	}
 #endif
-
-	FMessageDialog::Open(EAppMsgType::Ok, Message);
 
 	// Ensure immediate termination
 	UE_LOG(LogCompanyLicensing, Error, TEXT("Exiting application due to license validation failure"));

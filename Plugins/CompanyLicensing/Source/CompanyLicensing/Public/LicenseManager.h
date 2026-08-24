@@ -27,6 +27,7 @@ private:
 
 	bool TryLoadLicenseFile(FLicensePayload& OutPayload, FString& OutPath) const;
 	static bool ParseLicenseJson(const FString& JsonText, FLicensePayload& OutPayload);
+	void ShowSuccessDialog(ELicenseState SuccessState) const;
 	void FailAndExit(ELicenseState FailedState) const;
 
 	ELicenseState State = ELicenseState::LicenseInvalid;
