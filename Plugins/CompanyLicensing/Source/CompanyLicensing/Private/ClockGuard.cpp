@@ -15,38 +15,48 @@ namespace
 {
 	bool ReadRegistryString(const TCHAR* SubKey, const TCHAR* ValueName, FString& OutValue)
 	{
-		HKEY hKey;
-		if (RegOpenKeyExW(HKEY_CURRENT_USER, SubKey, 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+		HKEY hKey = nullptr;
+		if (RegOpenKeyExW(HKEY_CURRENT_USER, SubKey, 0, KEY_READ, &hKey) != ERROR_SUCCESS || hKey == nullptr)
 		{
-			DWORD Type;
-			DWORD DataSize = 0;
-			if (RegQueryValueExW(hKey, ValueName, nullptr, &Type, nullptr, &DataSize) == ERROR_SUCCESS && Type == REG_SZ)
-			{
-				TArray<TCHAR> Buffer;
-				Buffer.SetNum(DataSize / sizeof(TCHAR));
-				if (RegQueryValueExW(hKey, ValueName, nullptr, nullptr, reinterpret_cast<LPBYTE>(Buffer.GetData()), &DataSize) == ERROR_SUCCESS)
-				{
-					OutValue = FString(Buffer.GetData());
-					RegCloseKey(hKey);
-					return true;
-				}
-			}
-			RegCloseKey(hKey);
+			return false;
 		}
-		return false;
+
+		bool bSuccess = false;
+		DWORD Type = 0;
+		DWORD DataSize = 0;
+
+		// First query to get the size
+		if (RegQueryValueExW(hKey, ValueName, nullptr, &Type, nullptr, &DataSize) == ERROR_SUCCESS && Type == REG_SZ && DataSize > 0)
+		{
+			TArray<TCHAR> Buffer;
+			Buffer.SetNum(DataSize / sizeof(TCHAR) + 1); // +1 for safety
+
+			// Second query to get the actual data
+			if (RegQueryValueExW(hKey, ValueName, nullptr, nullptr, reinterpret_cast<LPBYTE>(Buffer.GetData()), &DataSize) == ERROR_SUCCESS)
+			{
+				// Ensure null termination
+				Buffer[DataSize / sizeof(TCHAR)] = TEXT('\0');
+				OutValue = FString(Buffer.GetData());
+				bSuccess = true;
+			}
+		}
+
+		RegCloseKey(hKey);
+		return bSuccess;
 	}
 
 	bool WriteRegistryString(const TCHAR* SubKey, const TCHAR* ValueName, const FString& Value)
 	{
-		HKEY hKey;
-		if (RegCreateKeyExW(HKEY_CURRENT_USER, SubKey, 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr) == ERROR_SUCCESS)
+		HKEY hKey = nullptr;
+		if (RegCreateKeyExW(HKEY_CURRENT_USER, SubKey, 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr) != ERROR_SUCCESS || hKey == nullptr)
 		{
-			const DWORD DataSize = (Value.Len() + 1) * sizeof(TCHAR);
-			const LSTATUS Status = RegSetValueExW(hKey, ValueName, 0, REG_SZ, reinterpret_cast<const BYTE*>(*Value), DataSize);
-			RegCloseKey(hKey);
-			return Status == ERROR_SUCCESS;
+			return false;
 		}
-		return false;
+
+		const DWORD DataSize = (Value.Len() + 1) * sizeof(TCHAR);
+		const LSTATUS Status = RegSetValueExW(hKey, ValueName, 0, REG_SZ, reinterpret_cast<const BYTE*>(*Value), DataSize);
+		RegCloseKey(hKey);
+		return Status == ERROR_SUCCESS;
 	}
 }
 #endif
@@ -66,7 +76,7 @@ bool FClockGuard::DetectRollback(const FDateTime& NowUtc)
 			FTimespan Delta = LastSeenUtc - NowUtc;
 			if (NowUtc < (LastSeenUtc - FTimespan::FromSeconds(ToleranceSeconds)))
 			{
-				UE_LOG(LogClockGuard, Warning, TEXT("Clock rollback detected: current=%s, lastSeen=%s, delta=%lld seconds"), *NowUtc.ToIso8601(), *LastSeenUtc.ToIso8601(), Delta.GetTotalSeconds());
+				UE_LOG(LogClockGuard, Warning, TEXT("Clock rollback detected: current=%s, lastSeen=%s, delta=%.0f seconds"), *NowUtc.ToIso8601(), *LastSeenUtc.ToIso8601(), Delta.GetTotalSeconds());
 				bRollbackDetected = true;
 			}
 		}

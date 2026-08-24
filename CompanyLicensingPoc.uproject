@@ -1,6 +1,6 @@
 {
 	"FileVersion": 3,
-	"EngineAssociation": "",
+	"EngineAssociation": "{C9E3F82D-49C1-9F7D-6F88-659B7093F4B5}",
 	"Category": "POC",
 	"Description": "Embedded license-check proof of concept. Licensing logic compiles into the packaged application.",
 	"Modules": [

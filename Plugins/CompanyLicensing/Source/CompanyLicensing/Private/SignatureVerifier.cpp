@@ -3,12 +3,21 @@
 
 #if PLATFORM_WINDOWS
 // Prevent OpenSSL ossl_typ.h from defining 'typedef struct ui_st UI'
-// which collides with Unreal Engine's UI namespace.
+// which collides with Unreal Engine's UI namespace. Define a temporary
+// macro that remaps the identifier while including OpenSSL headers only.
 #define OPENSSL_NO_UI_CONSOLE
 #define OPENSSL_NO_UI
+#define UI OPENSSL_UI
 #endif
 
 #include <openssl/evp.h>
+
+#if PLATFORM_WINDOWS
+// Undo temporary macro to avoid affecting engine headers
+#undef UI
+#undef OPENSSL_NO_UI
+#undef OPENSSL_NO_UI_CONSOLE
+#endif
 
 bool FSignatureVerifier::VerifyEd25519(const TArray<uint8>& CanonicalUtf8, const TArray<uint8>& Signature)
 {
@@ -34,8 +43,8 @@ bool FSignatureVerifier::VerifyEd25519(const TArray<uint8>& CanonicalUtf8, const
 		return false;
 	}
 
-	int32 InitOk = EVP_DigestVerifyInit(Context, nullptr, nullptr, nullptr, PublicKey);
 	int32 VerifyOk = 0;
+	int32 InitOk = EVP_DigestVerifyInit(Context, nullptr, nullptr, nullptr, PublicKey);
 	if (InitOk == 1)
 	{
 		VerifyOk = EVP_DigestVerify(

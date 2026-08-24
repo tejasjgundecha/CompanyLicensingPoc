@@ -14,6 +14,27 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogCompanyLicensing, Log, All);
 
+namespace
+{
+	void DebugLogToFile(const FString& Message)
+	{
+		static FString DebugLogPath;
+		if (DebugLogPath.IsEmpty())
+		{
+			DebugLogPath = FPaths::Combine(
+				FPaths::GetPath(FPlatformProcess::ExecutablePath()),
+				TEXT("license_debug.log"));
+			// Clear previous log on first call
+			FFileHelper::SaveStringToFile(TEXT(""), *DebugLogPath);
+		}
+		FString Line = FString::Printf(TEXT("[%s] %s\n"), *FDateTime::UtcNow().ToIso8601(), *Message);
+		FFileHelper::SaveStringToFile(Line, *DebugLogPath,
+			FFileHelper::EEncodingOptions::AutoDetect,
+			&IFileManager::Get(),
+			FILEWRITE_Append);
+	}
+}
+
 FLicenseManager& FLicenseManager::Get()
 {
 	static FLicenseManager Singleton;
@@ -50,15 +71,21 @@ FDateTime FLicenseManager::GetClockNowUtc()
 
 void FLicenseManager::InitializeAndEnforce()
 {
+	DebugLogToFile(TEXT("========== License Manager InitializeAndEnforce() ENTERED =========="));
+
 	if (bInitialized)
 	{
+		DebugLogToFile(TEXT("Already initialized, returning early"));
 		return;
 	}
 	bInitialized = true;
 
+	UE_LOG(LogCompanyLicensing, Warning, TEXT("========== License Manager Initialization Starting =========="));
+
 	if (IsRunningCommandlet())
 	{
 		UE_LOG(LogCompanyLicensing, Log, TEXT("Skipping license enforcement while a commandlet is running (cook/packaging)."));
+		UE_LOG(LogCompanyLicensing, Warning, TEXT("========== License Manager Initialization Skipped (Commandlet) =========="));
 		return;
 	}
 
@@ -67,6 +94,8 @@ void FLicenseManager::InitializeAndEnforce()
 	{
 		State = ELicenseState::LicenseMissing;
 		UE_LOG(LogCompanyLicensing, Error, TEXT("License file not found. Looked next to the executable and in the project directory."));
+		UE_LOG(LogCompanyLicensing, Warning, TEXT("========== License Manager Initialization Failed: License Missing =========="));
+		DebugLogToFile(TEXT("License file not found."));
 		FailAndExit(State);
 		return;
 	}
@@ -74,34 +103,59 @@ void FLicenseManager::InitializeAndEnforce()
 	Payload = Loaded;
 	const FDateTime NowUtc = GetClockNowUtc();
 
+	UE_LOG(LogCompanyLicensing, Log, TEXT("License successfully loaded from: %s"), *LicenseFilePath);
+	UE_LOG(LogCompanyLicensing, Log, TEXT("  License ID: %s"), *Payload.LicenseId);
+	UE_LOG(LogCompanyLicensing, Log, TEXT("  Project ID: %s"), *Payload.ProjectId);
+	UE_LOG(LogCompanyLicensing, Log, TEXT("  Current UTC Time: %s"), *NowUtc.ToIso8601());
+
 	// Clock rollback check (Windows Shipping builds only — non-Shipping supports fake clocks)
 #if PLATFORM_WINDOWS && UE_BUILD_SHIPPING
+	UE_LOG(LogCompanyLicensing, Log, TEXT("Performing clock rollback detection (Windows Shipping)..."));
 	if (FClockGuard::DetectRollback(NowUtc))
 	{
 		State = ELicenseState::ClockRollback;
 		UE_LOG(LogCompanyLicensing, Error, TEXT("License state=%s — system clock rollback detected"),
 			LicenseStateToString(State));
+		UE_LOG(LogCompanyLicensing, Warning, TEXT("========== License Manager Initialization Failed: Clock Rollback =========="));
+		DebugLogToFile(TEXT("Clock rollback detected."));
 		FailAndExit(State);
 		return;
 	}
+	UE_LOG(LogCompanyLicensing, Log, TEXT("Clock rollback check passed"));
+#else
+	UE_LOG(LogCompanyLicensing, Log, TEXT("Skipping clock rollback detection (not Windows Shipping)"));
 #endif
 
+	UE_LOG(LogCompanyLicensing, Log, TEXT("Starting license validation..."));
 	State = FLicenseValidator::Validate(Payload, NowUtc);
+	UE_LOG(LogCompanyLicensing, Log, TEXT("License validation completed"));
 	UE_LOG(LogCompanyLicensing, Log, TEXT("License state=%s file=%s licenseId=%s"),
 		LicenseStateToString(State),
 		*LicenseFilePath,
 		*Payload.LicenseId);
 
+	DebugLogToFile(FString::Printf(TEXT("Validation completed. State=%s"), LicenseStateToString(State)));
+
 	if (!LicenseStateAllowsRun(State))
 	{
+		UE_LOG(LogCompanyLicensing, Error, TEXT("License validation failed with state: %s"), LicenseStateToString(State));
+		UE_LOG(LogCompanyLicensing, Warning, TEXT("========== License Manager Initialization Failed: Invalid License =========="));
+		DebugLogToFile(TEXT("License validation failed. Exiting."));
 		FailAndExit(State);
 		return;
 	}
 
+	UE_LOG(LogCompanyLicensing, Log, TEXT("License validation successful!"));
+
 	// Record timestamp after successful validation (Windows only)
 #if PLATFORM_WINDOWS
+	UE_LOG(LogCompanyLicensing, Log, TEXT("Recording timestamp for rollback detection..."));
 	FClockGuard::RecordTimestamp(NowUtc);
+	UE_LOG(LogCompanyLicensing, Log, TEXT("Timestamp recorded"));
 #endif
+
+	UE_LOG(LogCompanyLicensing, Warning, TEXT("========== License Manager Initialization Successful =========="));
+	DebugLogToFile(TEXT("========== License Manager Initialization Successful =========="));
 }
 
 bool FLicenseManager::TryLoadLicenseFile(FLicensePayload& OutPayload, FString& OutPath) const
@@ -114,25 +168,38 @@ bool FLicenseManager::TryLoadLicenseFile(FLicensePayload& OutPayload, FString& O
 	Candidates.Add(FPaths::Combine(FPaths::ProjectDir(), TEXT("license.json")));
 	Candidates.Add(FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/licenses/valid/license.json")));
 
+	UE_LOG(LogCompanyLicensing, Log, TEXT("Searching for license file in %d locations"), Candidates.Num());
+
 	for (FString Candidate : Candidates)
 	{
 		FPaths::NormalizeFilename(Candidate);
+		UE_LOG(LogCompanyLicensing, Log, TEXT("  Checking: %s"), *Candidate);
+
 		if (FPaths::FileExists(Candidate))
 		{
+			UE_LOG(LogCompanyLicensing, Log, TEXT("    Found! Loading... %s"), *Candidate);
 			FString JsonText;
 			if (!FFileHelper::LoadFileToString(JsonText, *Candidate))
 			{
+				UE_LOG(LogCompanyLicensing, Warning, TEXT("    Failed to read file"));
 				continue;
 			}
+
 			if (ParseLicenseJson(JsonText, OutPayload))
 			{
 				OutPayload.bLoadedFromDisk = true;
 				OutPath = Candidate;
+				UE_LOG(LogCompanyLicensing, Log, TEXT("    Successfully parsed license"));
 				return true;
+			}
+			else
+			{
+				UE_LOG(LogCompanyLicensing, Warning, TEXT("    Failed to parse JSON"));
 			}
 		}
 	}
 
+	UE_LOG(LogCompanyLicensing, Warning, TEXT("License file not found in any location"));
 	return false;
 }
 
@@ -170,5 +237,8 @@ void FLicenseManager::FailAndExit(ELicenseState FailedState) const
 #endif
 
 	FMessageDialog::Open(EAppMsgType::Ok, Message);
-	FPlatformMisc::RequestExitWithStatus(true, 1);
+
+	// Ensure immediate termination
+	UE_LOG(LogCompanyLicensing, Error, TEXT("Exiting application due to license validation failure"));
+	FPlatformMisc::RequestExit(false);
 }

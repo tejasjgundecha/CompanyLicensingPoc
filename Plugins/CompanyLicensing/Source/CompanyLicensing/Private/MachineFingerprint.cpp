@@ -3,11 +3,22 @@
 DEFINE_LOG_CATEGORY_STATIC(LogMachineFingerprint, Log, All);
 
 #if PLATFORM_WINDOWS
+// Prevent OpenSSL ossl_typ.h from defining 'typedef struct ui_st UI'
+// which collides with Unreal Engine's UI namespace. Define a temporary
+// macro that remaps the identifier while including OpenSSL headers only.
 #define OPENSSL_NO_UI_CONSOLE
 #define OPENSSL_NO_UI
+#define UI OPENSSL_UI
 #endif
 
 #include <openssl/evp.h>
+
+#if PLATFORM_WINDOWS
+// Undo temporary macro to avoid affecting engine headers
+#undef UI
+#undef OPENSSL_NO_UI
+#undef OPENSSL_NO_UI_CONSOLE
+#endif
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
@@ -24,29 +35,38 @@ namespace
 		void* WritePipe = nullptr;
 		FPlatformProcess::CreatePipe(ReadPipe, WritePipe);
 
+		if (ReadPipe == nullptr || WritePipe == nullptr)
+		{
+			FPlatformProcess::ClosePipe(ReadPipe, WritePipe);
+			return TEXT("UNKNOWN");
+		}
+
 		FString Cmd = TEXT("wmic");
 		FProcHandle ProcHandle = FPlatformProcess::CreateProc(
 			*Cmd, *WmicArgs, false, true, true, nullptr, 0, nullptr, WritePipe, ReadPipe);
 
-		if (ProcHandle.IsValid())
+		if (!ProcHandle.IsValid())
 		{
-			while (FPlatformProcess::IsProcRunning(ProcHandle))
-			{
-				FString PipeOut = FPlatformProcess::ReadPipe(ReadPipe);
-				if (!PipeOut.IsEmpty())
-				{
-					Output += PipeOut;
-				}
-				FPlatformProcess::Sleep(0.01f);
-			}
+			FPlatformProcess::ClosePipe(ReadPipe, WritePipe);
+			return TEXT("UNKNOWN");
+		}
 
+		while (FPlatformProcess::IsProcRunning(ProcHandle))
+		{
 			FString PipeOut = FPlatformProcess::ReadPipe(ReadPipe);
 			if (!PipeOut.IsEmpty())
 			{
 				Output += PipeOut;
 			}
-			FPlatformProcess::CloseProc(ProcHandle);
+			FPlatformProcess::Sleep(0.01f);
 		}
+
+		FString PipeOut = FPlatformProcess::ReadPipe(ReadPipe);
+		if (!PipeOut.IsEmpty())
+		{
+			Output += PipeOut;
+		}
+		FPlatformProcess::CloseProc(ProcHandle);
 
 		FPlatformProcess::ClosePipe(ReadPipe, WritePipe);
 
@@ -75,7 +95,14 @@ namespace
 			return FString();
 		}
 
-		if (EVP_DigestInit_ex(Context, EVP_sha256(), nullptr) != 1)
+		const EVP_MD* Sha256Md = EVP_sha256();
+		if (!Sha256Md)
+		{
+			EVP_MD_CTX_free(Context);
+			return FString();
+		}
+
+		if (EVP_DigestInit_ex(Context, Sha256Md, nullptr) != 1)
 		{
 			EVP_MD_CTX_free(Context);
 			return FString();
@@ -87,9 +114,9 @@ namespace
 			return FString();
 		}
 
-		uint8 Hash[EVP_MAX_MD_SIZE];
+		uint8 Hash[EVP_MAX_MD_SIZE] = {0};  // Initialize to zero
 		uint32 HashLen = 0;
-		if (EVP_DigestFinal_ex(Context, Hash, &HashLen) != 1)
+		if (EVP_DigestFinal_ex(Context, Hash, &HashLen) != 1 || HashLen == 0 || HashLen > EVP_MAX_MD_SIZE)
 		{
 			EVP_MD_CTX_free(Context);
 			return FString();
@@ -117,12 +144,14 @@ FString FMachineFingerprint::ComputeFingerprint()
 	FString MachineGuid = TEXT("UNKNOWN");
 
 	HKEY hKey = nullptr;
-	if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Cryptography", 0, KEY_READ | KEY_WOW64_64KEY, &hKey) == ERROR_SUCCESS)
+	if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Cryptography", 0, KEY_READ | KEY_WOW64_64KEY, &hKey) == ERROR_SUCCESS && hKey != nullptr)
 	{
-		WCHAR Value[256];
-		DWORD Size = sizeof(Value);
+		WCHAR Value[256] = {0};  // Initialize to zero
+		DWORD Size = sizeof(Value) - sizeof(WCHAR);  // Leave room for null terminator
 		if (RegQueryValueExW(hKey, L"MachineGuid", nullptr, nullptr, (LPBYTE)Value, &Size) == ERROR_SUCCESS)
 		{
+			// Ensure null termination even if registry value is oversized
+			Value[255] = L'\0';
 			MachineGuid = FString(Value).TrimStartAndEnd();
 		}
 		RegCloseKey(hKey);

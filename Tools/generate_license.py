@@ -39,10 +39,12 @@ def sign(payload: bytes, private_pem: Path) -> bytes:
         payload_file.write(payload)
     with tempfile.NamedTemporaryFile(delete=False) as sig_file:
         sig_path = Path(sig_file.name)
+    import shutil
+    openssl_cmd = shutil.which("openssl") or r"C:\Program Files\Git\usr\bin\openssl.exe"
     try:
         subprocess.check_call(
             [
-                "openssl",
+                openssl_cmd,
                 "pkeyutl",
                 "-sign",
                 "-inkey",
