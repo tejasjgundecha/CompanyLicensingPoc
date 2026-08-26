@@ -180,13 +180,19 @@ bool FLicenseManager::TryLoadLicenseFile(FLicensePayload& OutPayload, FString& O
 	TArray<FString> Candidates;
 
 	const FString ExeDir = FPaths::GetPath(FPlatformProcess::ExecutablePath());
+	// 1. Check directory containing the executable
 	Candidates.Add(FPaths::Combine(ExeDir, TEXT("license.json")));
-	Candidates.Add(FPaths::Combine(ExeDir, TEXT("../../license.json")));
-	Candidates.Add(FPaths::Combine(ExeDir, TEXT("../../../license.json")));
-	Candidates.Add(FPaths::Combine(FPaths::RootDir(), TEXT("license.json")));
+
+	// 2. Check launch / working directory
 	Candidates.Add(FPaths::Combine(FPaths::LaunchDir(), TEXT("license.json")));
+
+	// 3. Check packaged root directory (where main launcher executable resides)
+	Candidates.Add(FPaths::Combine(FPaths::RootDir(), TEXT("license.json")));
+
+#if WITH_EDITOR
+	// 4. In Editor only: check project root directory
 	Candidates.Add(FPaths::Combine(FPaths::ProjectDir(), TEXT("license.json")));
-	Candidates.Add(FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/licenses/valid/license.json")));
+#endif
 
 	UE_LOG(LogCompanyLicensing, Log, TEXT("Searching for license file in %d locations"), Candidates.Num());
 
@@ -267,5 +273,9 @@ void FLicenseManager::FailAndExit(ELicenseState FailedState) const
 
 	// Ensure immediate termination
 	UE_LOG(LogCompanyLicensing, Error, TEXT("Exiting application due to license validation failure"));
-	FPlatformMisc::RequestExit(false);
+	FPlatformMisc::RequestExit(true);
+
+#if PLATFORM_WINDOWS
+	::ExitProcess(1);
+#endif
 }
