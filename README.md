@@ -113,9 +113,10 @@ or environment variable `COMPANY_LICENSING_FAKE_NOW`. Use this to exercise the 1
 
 ## Docs
 
-1. [docs/LICENSE_GENERATION.md](docs/LICENSE_GENERATION.md) — keys and licenses
-2. [docs/PACKAGING_AND_TEST.md](docs/PACKAGING_AND_TEST.md) — Windows Shipping package
-3. [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) — expected results
+1. [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md) — How to copy and integrate the plugin into other Unreal projects
+2. [docs/LICENSE_GENERATION.md](docs/LICENSE_GENERATION.md) — keys and licenses
+3. [docs/PACKAGING_AND_TEST.md](docs/PACKAGING_AND_TEST.md) — Windows Shipping package
+4. [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) — expected results
 
 ## What this POC does not include
 
