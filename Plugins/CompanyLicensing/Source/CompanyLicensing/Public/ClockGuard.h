@@ -31,4 +31,5 @@ private:
 	static const TCHAR* RegistrySubKey;
 	static const TCHAR* LastSeenValueName;
 	static const TCHAR* BootTimeValueName;
+	static const TCHAR* AnchorSigValueName;
 };

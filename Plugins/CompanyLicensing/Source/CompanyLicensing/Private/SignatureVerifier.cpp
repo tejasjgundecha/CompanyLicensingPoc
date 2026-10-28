@@ -26,11 +26,17 @@ bool FSignatureVerifier::VerifyEd25519(const TArray<uint8>& CanonicalUtf8, const
 		return false;
 	}
 
+	uint8 AssembledKey[32];
+	CompanyLicensing::GetEmbeddedPublicKey(AssembledKey);
+
 	EVP_PKEY* PublicKey = EVP_PKEY_new_raw_public_key(
 		EVP_PKEY_ED25519,
 		nullptr,
-		CompanyLicensing::EmbeddedPublicKey,
+		AssembledKey,
 		32);
+
+	FMemory::Memzero(AssembledKey, sizeof(AssembledKey));
+
 	if (!PublicKey)
 	{
 		return false;

@@ -28,61 +28,138 @@ DEFINE_LOG_CATEGORY_STATIC(LogMachineFingerprint, Log, All);
 
 namespace
 {
-	FString RunWmicQuery(const FString& WmicArgs)
+#pragma pack(push, 1)
+	struct FRawSmbiosData
 	{
-		FString Output;
-		void* ReadPipe = nullptr;
-		void* WritePipe = nullptr;
-		FPlatformProcess::CreatePipe(ReadPipe, WritePipe);
+		uint8  Used20CallingMethod;
+		uint8  SMBIOSMajorVersion;
+		uint8  SMBIOSMinorVersion;
+		uint8  DmiRevision;
+		uint32 Length;
+		uint8  SMBIOSTableData[1];
+	};
 
-		if (ReadPipe == nullptr || WritePipe == nullptr)
+	struct FSmbiosHeader
+	{
+		uint8  Type;
+		uint8  Length;
+		uint16 Handle;
+	};
+#pragma pack(pop)
+
+	bool GetSmbiosInfo(FString& OutUuid, FString& OutBoardSerial)
+	{
+		OutUuid = TEXT("UNKNOWN");
+		OutBoardSerial = TEXT("UNKNOWN");
+
+		const DWORD Signature = 0x52534D42; // 'RSMB'
+		const DWORD BufferSize = GetSystemFirmwareTable(Signature, 0, nullptr, 0);
+		if (BufferSize == 0)
 		{
-			FPlatformProcess::ClosePipe(ReadPipe, WritePipe);
-			return TEXT("UNKNOWN");
+			return false;
 		}
 
-		FString Cmd = TEXT("wmic");
-		FProcHandle ProcHandle = FPlatformProcess::CreateProc(
-			*Cmd, *WmicArgs, false, true, true, nullptr, 0, nullptr, WritePipe, ReadPipe);
-
-		if (!ProcHandle.IsValid())
+		TArray<uint8> Buffer;
+		Buffer.SetNumUninitialized(BufferSize);
+		const DWORD BytesRead = GetSystemFirmwareTable(Signature, 0, Buffer.GetData(), BufferSize);
+		if (BytesRead == 0 || BytesRead > BufferSize)
 		{
-			FPlatformProcess::ClosePipe(ReadPipe, WritePipe);
-			return TEXT("UNKNOWN");
+			return false;
 		}
 
-		while (FPlatformProcess::IsProcRunning(ProcHandle))
+		const FRawSmbiosData* SmbiosData = reinterpret_cast<const FRawSmbiosData*>(Buffer.GetData());
+		if (SmbiosData->Length > BufferSize)
 		{
-			FString PipeOut = FPlatformProcess::ReadPipe(ReadPipe);
-			if (!PipeOut.IsEmpty())
+			return false;
+		}
+
+		const uint8* Current = SmbiosData->SMBIOSTableData;
+		const uint8* TableEnd = SmbiosData->SMBIOSTableData + SmbiosData->Length;
+
+		bool bFoundUuid = false;
+		bool bFoundSerial = false;
+
+		while (Current + sizeof(FSmbiosHeader) <= TableEnd)
+		{
+			const FSmbiosHeader* Header = reinterpret_cast<const FSmbiosHeader*>(Current);
+			if (Header->Length < sizeof(FSmbiosHeader))
 			{
-				Output += PipeOut;
+				break;
 			}
-			FPlatformProcess::Sleep(0.01f);
-		}
 
-		FString PipeOut = FPlatformProcess::ReadPipe(ReadPipe);
-		if (!PipeOut.IsEmpty())
-		{
-			Output += PipeOut;
-		}
-		FPlatformProcess::CloseProc(ProcHandle);
-
-		FPlatformProcess::ClosePipe(ReadPipe, WritePipe);
-
-		// Parse output: looking for KEY=VALUE
-		TArray<FString> Lines;
-		Output.ParseIntoArrayLines(Lines, true);
-		for (const FString& Line : Lines)
-		{
-			int32 EqualsIdx = 0;
-			if (Line.FindChar('=', EqualsIdx))
+			const uint8* FormattedEnd = Current + Header->Length;
+			if (FormattedEnd > TableEnd)
 			{
-				return Line.Mid(EqualsIdx + 1).TrimStartAndEnd();
+				break;
+			}
+
+			// Type 1: System Information (UUID at offset 0x08, length 16)
+			if (Header->Type == 1 && Header->Length >= 0x19 && !bFoundUuid)
+			{
+				const uint8* Uuid = Current + 0x08;
+				bool bAllZero = true;
+				bool bAllFF = true;
+				for (int32 i = 0; i < 16; ++i)
+				{
+					if (Uuid[i] != 0x00) bAllZero = false;
+					if (Uuid[i] != 0xFF) bAllFF = false;
+				}
+
+				if (!bAllZero && !bAllFF)
+				{
+					const uint32 Data1 = *reinterpret_cast<const uint32*>(Uuid);
+					const uint16 Data2 = *reinterpret_cast<const uint16*>(Uuid + 4);
+					const uint16 Data3 = *reinterpret_cast<const uint16*>(Uuid + 6);
+					OutUuid = FString::Printf(TEXT("%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X"),
+						Data1, Data2, Data3,
+						Uuid[8], Uuid[9], Uuid[10], Uuid[11],
+						Uuid[12], Uuid[13], Uuid[14], Uuid[15]);
+					bFoundUuid = true;
+				}
+			}
+
+			// Type 2: BaseBoard Information (SerialNumber string index at offset 0x07)
+			if (Header->Type == 2 && Header->Length >= 0x08 && !bFoundSerial)
+			{
+				const uint8 SerialIndex = *(Current + 0x07);
+				if (SerialIndex > 0)
+				{
+					const char* Str = reinterpret_cast<const char*>(FormattedEnd);
+					uint8 CurrentIndex = 1;
+					while (reinterpret_cast<const uint8*>(Str) < TableEnd && *Str != '\0')
+					{
+						if (CurrentIndex == SerialIndex)
+						{
+							OutBoardSerial = FString(ANSI_TO_TCHAR(Str)).TrimStartAndEnd().ToUpper();
+							bFoundSerial = true;
+							break;
+						}
+						Str += strlen(Str) + 1;
+						CurrentIndex++;
+					}
+				}
+			}
+
+			// Strings area ends with a double null character
+			const uint8* Scan = FormattedEnd;
+			while (Scan + 1 < TableEnd)
+			{
+				if (Scan[0] == 0 && Scan[1] == 0)
+				{
+					Scan += 2;
+					break;
+				}
+				Scan++;
+			}
+			Current = Scan;
+
+			if (Header->Type == 127) // End of table
+			{
+				break;
 			}
 		}
 
-		return TEXT("UNKNOWN");
+		return bFoundUuid || bFoundSerial;
 	}
 
 	FString Sha256Hex(const FString& Input)
@@ -139,8 +216,10 @@ namespace
 FString FMachineFingerprint::ComputeFingerprint()
 {
 #if PLATFORM_WINDOWS
-	FString BiosUuid = RunWmicQuery(TEXT("path Win32_ComputerSystemProduct get UUID /value")).ToUpper();
-	FString MotherboardSerial = RunWmicQuery(TEXT("path Win32_BaseBoard get SerialNumber /value")).ToUpper();
+	FString BiosUuid;
+	FString MotherboardSerial;
+	GetSmbiosInfo(BiosUuid, MotherboardSerial);
+
 	FString MachineGuid = TEXT("UNKNOWN");
 
 	HKEY hKey = nullptr;

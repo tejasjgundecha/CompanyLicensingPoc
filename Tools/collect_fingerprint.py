@@ -19,20 +19,70 @@ import sys
 import winreg  # Windows only
 
 
-def wmic_value(wmic_class: str, field: str) -> str:
-    """Run a wmic query and return the trimmed value."""
+def get_smbios_info() -> tuple[str, str]:
+    """Extract BIOS UUID and Motherboard Serial in-process via GetSystemFirmwareTable ('RSMB')."""
+    bios_uuid = "UNKNOWN"
+    mb_serial = "UNKNOWN"
     try:
-        result = subprocess.run(
-            ["wmic", "path", wmic_class, "get", field, "/value"],
-            capture_output=True, text=True, timeout=10,
-        )
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if line.startswith(f"{field}="):
-                return line.split("=", 1)[1].strip().upper()
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.windll.kernel32
+        GetSystemFirmwareTable = kernel32.GetSystemFirmwareTable
+        GetSystemFirmwareTable.restype = wintypes.UINT
+        GetSystemFirmwareTable.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.c_void_p, wintypes.DWORD]
+
+        # 'RSMB' in DWORD little endian is 0x52534D42
+        rsmb_sig = 0x52534D42
+        size = GetSystemFirmwareTable(rsmb_sig, 0, None, 0)
+        if size == 0:
+            return bios_uuid, mb_serial
+
+        buf = ctypes.create_string_buffer(size)
+        read_bytes = GetSystemFirmwareTable(rsmb_sig, 0, buf, size)
+        if read_bytes == 0:
+            return bios_uuid, mb_serial
+
+        data = buf.raw
+        # Parse SMBIOS raw table data starting after 8-byte header
+        table_len = int.from_bytes(data[4:8], "little")
+        offset = 8
+        limit = min(offset + table_len, len(data))
+
+        while offset + 4 <= limit:
+            hdr_type = data[offset]
+            hdr_len = data[offset + 1]
+            if hdr_len < 4 or offset + hdr_len > limit:
+                break
+
+            # Type 1: System Information (UUID at offset 8, length 16)
+            if hdr_type == 1 and hdr_len >= 0x19 and bios_uuid == "UNKNOWN":
+                uuid_bytes = data[offset + 8 : offset + 24]
+                if uuid_bytes != b"\x00" * 16 and uuid_bytes != b"\xFF" * 16:
+                    d1 = int.from_bytes(uuid_bytes[0:4], "little")
+                    d2 = int.from_bytes(uuid_bytes[4:6], "little")
+                    d3 = int.from_bytes(uuid_bytes[6:8], "little")
+                    bios_uuid = f"{d1:08X}-{d2:04X}-{d3:04X}-" + "".join(f"{b:02X}" for b in uuid_bytes[8:10]) + "-" + "".join(f"{b:02X}" for b in uuid_bytes[10:16])
+
+            # Type 2: BaseBoard Information (SerialNumber string index at offset 7)
+            if hdr_type == 2 and hdr_len >= 8 and mb_serial == "UNKNOWN":
+                serial_idx = data[offset + 7]
+                if serial_idx > 0:
+                    str_area = data[offset + hdr_len :]
+                    strings = [s.decode("latin-1", errors="ignore").strip() for s in str_area.split(b"\x00")]
+                    if 0 < serial_idx <= len(strings) and strings[serial_idx - 1]:
+                        mb_serial = strings[serial_idx - 1].upper()
+
+            # Advance past strings area (terminated by \x00\x00)
+            end_strings = data.find(b"\x00\x00", offset + hdr_len)
+            if end_strings == -1:
+                break
+            offset = end_strings + 2
+            if hdr_type == 127:
+                break
     except Exception as e:
-        print(f"Warning: wmic query failed for {wmic_class}.{field}: {e}", file=sys.stderr)
-    return "UNKNOWN"
+        print(f"Warning: in-process SMBIOS query failed: {e}", file=sys.stderr)
+
+    return bios_uuid, mb_serial
 
 
 def machine_guid() -> str:
@@ -53,8 +103,7 @@ def machine_guid() -> str:
 
 
 def compute_fingerprint() -> str:
-    bios_uuid = wmic_value("Win32_ComputerSystemProduct", "UUID")
-    mb_serial = wmic_value("Win32_BaseBoard", "SerialNumber")
+    bios_uuid, mb_serial = get_smbios_info()
     guid = machine_guid()
     raw = f"{bios_uuid}|{mb_serial}|{guid}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()

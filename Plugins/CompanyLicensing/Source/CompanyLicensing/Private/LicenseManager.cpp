@@ -5,6 +5,7 @@
 #include "Misc/Paths.h"
 #include "Misc/CommandLine.h"
 #include "Misc/MessageDialog.h"
+#include "Misc/Base64.h"
 #include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
 #include "Misc/CoreMisc.h"
@@ -13,7 +14,11 @@
 #include "Dom/JsonObject.h"
 
 #if PLATFORM_WINDOWS
-#include "Windows/WindowsHWrapper.h"
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include <windows.h>
+#include <wintrust.h>
+#include <softpub.h>
+#include "Windows/HideWindowsPlatformTypes.h"
 #endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogCompanyLicensing, Log, All);
@@ -31,6 +36,8 @@ namespace
 #endif
 	}
 
+#if !UE_BUILD_SHIPPING
+	// F8: Debug log file compiled only for non-shipping builds to prevent leaking state names in release
 	void DebugLogToFile(const FString& Message)
 	{
 		static FString DebugLogPath;
@@ -48,12 +55,60 @@ namespace
 			&IFileManager::Get(),
 			FILEWRITE_Append);
 	}
+#else
+#define DebugLogToFile(...) ((void)0)
+#endif
+
+#if PLATFORM_WINDOWS && UE_BUILD_SHIPPING
+	// F2: Runtime Authenticode signature check over own executable image
+	bool VerifyBinarySignature()
+	{
+		const FString ExePath = FPlatformProcess::ExecutablePath();
+
+		WINTRUST_FILE_INFO FileInfo;
+		FMemory::Memzero(&FileInfo, sizeof(FileInfo));
+		FileInfo.cbStruct = sizeof(FileInfo);
+		FileInfo.pcwszFilePath = *ExePath;
+
+		GUID ActionGuid = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+
+		WINTRUST_DATA TrustData;
+		FMemory::Memzero(&TrustData, sizeof(TrustData));
+		TrustData.cbStruct = sizeof(TrustData);
+		TrustData.dwUIChoice = WTD_UI_NONE;
+		TrustData.fdwRevocationChecks = WTD_REVOKE_NONE;
+		TrustData.dwUnionChoice = WTD_CHOICE_FILE;
+		TrustData.pFile = &FileInfo;
+		TrustData.dwStateAction = WTD_STATEACTION_VERIFY;
+
+		LONG Status = WinVerifyTrust(NULL, &ActionGuid, &TrustData);
+
+		TrustData.dwStateAction = WTD_STATEACTION_CLOSE;
+		WinVerifyTrust(NULL, &ActionGuid, &TrustData);
+
+		return (Status == ERROR_SUCCESS);
+	}
+#endif
 }
 
 FLicenseManager& FLicenseManager::Get()
 {
 	static FLicenseManager Singleton;
 	return Singleton;
+}
+
+FLicenseManager::~FLicenseManager()
+{
+	if (PeriodicTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(PeriodicTickerHandle);
+		PeriodicTickerHandle.Reset();
+	}
+
+	if (SessionKey.Num() > 0)
+	{
+		FMemory::Memzero(SessionKey.GetData(), SessionKey.Num());
+	}
 }
 
 FDateTime FLicenseManager::GetClockNowUtc()
@@ -84,8 +139,78 @@ FDateTime FLicenseManager::GetClockNowUtc()
 	return FDateTime::UtcNow();
 }
 
+bool FLicenseManager::HasValidSessionKey() const
+{
+	if (!LicenseStateAllowsRun(State) || SessionKey.Num() != 32)
+	{
+		return false;
+	}
+
+	uint8 Accumulator = 0;
+	for (int32 i = 0; i < SessionKey.Num(); ++i)
+	{
+		Accumulator |= SessionKey[i];
+	}
+	return (Accumulator != 0);
+}
+
+bool FLicenseManager::RevalidateSession()
+{
+	const FDateTime NowUtc = GetClockNowUtc();
+
+#if PLATFORM_WINDOWS && UE_BUILD_SHIPPING
+	if (!VerifyBinarySignature())
+	{
+		State = ELicenseState::LicenseTampered;
+		FMemory::Memzero(SessionKey.GetData(), SessionKey.Num());
+		FailAndExit(State);
+		return false;
+	}
+
+	if (FClockGuard::DetectRollback(NowUtc))
+	{
+		State = ELicenseState::ClockRollback;
+		FMemory::Memzero(SessionKey.GetData(), SessionKey.Num());
+		FailAndExit(State);
+		return false;
+	}
+#endif
+
+	State = FLicenseValidator::Validate(Payload, NowUtc);
+
+	TArray<uint8> SignatureBytes;
+	FBase64::Decode(Payload.SignatureBase64, SignatureBytes);
+	const bool bValid = LicenseStateAllowsRun(State);
+
+	FLicenseValidator::DeriveSessionKey(Payload, SignatureBytes, bValid, SessionKey);
+
+	if (!bValid)
+	{
+		FMemory::Memzero(SessionKey.GetData(), SessionKey.Num());
+		FailAndExit(State);
+		return false;
+	}
+
+#if PLATFORM_WINDOWS
+	FClockGuard::RecordTimestamp(NowUtc);
+#endif
+
+	return true;
+}
+
+bool FLicenseManager::OnPeriodicRevalidation(float DeltaTime)
+{
+	RevalidateSession();
+	return true;
+}
+
 void FLicenseManager::InitializeAndEnforce()
 {
+#if PLATFORM_WINDOWS
+	// F8: Mitigate DLL preloading and search-order hijacking
+	SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS);
+#endif
+
 	DebugLogToFile(TEXT("========== License Manager InitializeAndEnforce() ENTERED =========="));
 
 	if (bInitialized)
@@ -97,12 +222,27 @@ void FLicenseManager::InitializeAndEnforce()
 
 	UE_LOG(LogCompanyLicensing, Warning, TEXT("========== License Manager Initialization Starting =========="));
 
+#if !UE_BUILD_SHIPPING
+	// F3: Dormant commandlet check removed from shipping builds to prevent bypass branch
 	if (IsRunningCommandlet())
 	{
 		UE_LOG(LogCompanyLicensing, Log, TEXT("Skipping license enforcement while a commandlet is running (cook/packaging)."));
 		UE_LOG(LogCompanyLicensing, Warning, TEXT("========== License Manager Initialization Skipped (Commandlet) =========="));
 		return;
 	}
+#endif
+
+#if PLATFORM_WINDOWS && UE_BUILD_SHIPPING
+	// F2: Verify binary Authenticode digital signature and integrity
+	if (!VerifyBinarySignature())
+	{
+		State = ELicenseState::LicenseTampered;
+		UE_LOG(LogCompanyLicensing, Error, TEXT("Binary signature verification failed (untrusted or tampered image)"));
+		FLicenseValidator::DeriveSessionKey(Payload, TArray<uint8>(), false, SessionKey);
+		FailAndExit(State);
+		return;
+	}
+#endif
 
 	FLicensePayload Loaded;
 	if (!TryLoadLicenseFile(Loaded, LicenseFilePath))
@@ -111,6 +251,10 @@ void FLicenseManager::InitializeAndEnforce()
 		UE_LOG(LogCompanyLicensing, Error, TEXT("License file not found. Looked next to the executable and in the project directory."));
 		UE_LOG(LogCompanyLicensing, Warning, TEXT("========== License Manager Initialization Failed: License Missing =========="));
 		DebugLogToFile(TEXT("License file not found."));
+
+		// F1: Derive dummy session key on missing license
+		FLicenseValidator::DeriveSessionKey(Payload, TArray<uint8>(), false, SessionKey);
+
 		FailAndExit(State);
 		return;
 	}
@@ -133,6 +277,9 @@ void FLicenseManager::InitializeAndEnforce()
 			LicenseStateToString(State));
 		UE_LOG(LogCompanyLicensing, Warning, TEXT("========== License Manager Initialization Failed: Clock Rollback =========="));
 		DebugLogToFile(TEXT("Clock rollback detected."));
+
+		FLicenseValidator::DeriveSessionKey(Payload, TArray<uint8>(), false, SessionKey);
+
 		FailAndExit(State);
 		return;
 	}
@@ -151,7 +298,13 @@ void FLicenseManager::InitializeAndEnforce()
 
 	DebugLogToFile(FString::Printf(TEXT("Validation completed. State=%s"), LicenseStateToString(State)));
 
-	if (!LicenseStateAllowsRun(State))
+	// F1: Derive session key cryptographically
+	TArray<uint8> SignatureBytes;
+	FBase64::Decode(Payload.SignatureBase64, SignatureBytes);
+	const bool bValid = LicenseStateAllowsRun(State);
+	FLicenseValidator::DeriveSessionKey(Payload, SignatureBytes, bValid, SessionKey);
+
+	if (!bValid)
 	{
 		UE_LOG(LogCompanyLicensing, Error, TEXT("License validation failed with state: %s"), LicenseStateToString(State));
 		UE_LOG(LogCompanyLicensing, Warning, TEXT("========== License Manager Initialization Failed: Invalid License =========="));
@@ -168,6 +321,12 @@ void FLicenseManager::InitializeAndEnforce()
 	FClockGuard::RecordTimestamp(NowUtc);
 	UE_LOG(LogCompanyLicensing, Log, TEXT("Timestamp recorded"));
 #endif
+
+	// F4: Register periodic re-validation ticker with randomized jitter
+	const float JitteredInterval = FMath::RandRange(300.0f, 900.0f); // 5 to 15 minutes
+	PeriodicTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateRaw(this, &FLicenseManager::OnPeriodicRevalidation),
+		JitteredInterval);
 
 	UE_LOG(LogCompanyLicensing, Warning, TEXT("========== License Manager Initialization Successful =========="));
 	DebugLogToFile(TEXT("========== License Manager Initialization Successful =========="));

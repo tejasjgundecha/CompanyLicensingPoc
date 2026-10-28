@@ -7,12 +7,16 @@ void ACompanyLicensingPocHUD::DrawHUD()
 {
 	Super::DrawHUD();
 
+	// F1: Downstream execution relies cryptographically on a valid derived session key
+	// rather than a bypassed boolean branch.
+	const bool bSessionValid = FLicenseManager::Get().HasValidSessionKey();
 	const ELicenseState State = FLicenseManager::Get().GetState();
-	const bool bValid = LicenseStateAllowsRun(State);
+
+	const bool bValid = bSessionValid && LicenseStateAllowsRun(State);
 
 	const FString Message = bValid 
-		? TEXT("License Valid - Application Running") 
-		: FString::Printf(TEXT("LICENSE ERROR: %s - Refusing Execution"), LicenseStateToString(State));
+		? TEXT("License Valid - Application Running (Session Key Verified)") 
+		: FString::Printf(TEXT("LICENSE ERROR / CONTENT LOCKED: %s - Refusing Execution"), LicenseStateToString(State));
 
 	const FLinearColor Color = bValid ? FLinearColor::Green : FLinearColor::Red;
 

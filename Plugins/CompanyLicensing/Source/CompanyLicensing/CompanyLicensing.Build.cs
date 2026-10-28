@@ -26,6 +26,8 @@ public class CompanyLicensing : ModuleRules
 		{
 			PublicDefinitions.Add("OPENSSL_NO_UI");
 			PublicDefinitions.Add("OPENSSL_NO_UI_CONSOLE");
+			PublicAdditionalLibraries.Add("wintrust.lib");
+			PublicAdditionalLibraries.Add("crypt32.lib");
 		}
 	}
 }
